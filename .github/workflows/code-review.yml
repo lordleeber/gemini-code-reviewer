@@ -54,7 +54,7 @@ jobs:
           python .github/scripts/review.py
 
       - name: Post Review Comment to PR
-        if: steps.gemlin_review.outputs.stdout != '' # 確保有 review 內容才留言
+        if: steps.gemini_review.outputs.stdout != '' # 確保有 review 內容才留言
         uses: actions/github-script@v7
         with:
           script: |
