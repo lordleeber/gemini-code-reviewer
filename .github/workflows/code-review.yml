@@ -45,21 +45,20 @@ jobs:
         run: |
           set -eo pipefail
           
-          # 1. 使用 heredoc 將 prompt 模板安全地存入一個變數
-          # 這種方法對於多行文字和特殊字元非常安全
+          # 1. Use a "here document" to safely store the multi-line prompt template.
+          # This is the most reliable way to handle complex strings in shell.
           PROMPT_TEMPLATE=$(cat <<'EOF'
           Please act as a senior software engineer. Review the following code changes (git diff format) and provide constructive feedback. Focus on code quality, potential bugs, style consistency, and best practices. If there are no major issues, confirm that the code looks good. Here is the diff:
           
           EOF
           )
           
-          # 2. 從上一步的輸出中獲取 JSON 格式的 diff 內容
+          # 2. Get the JSON-formatted diff from the previous step's output.
           DIFF_CONTENT_JSON=${{ steps.get_diff.outputs.diff_json }}
           
-          # 3. 使用 --arg 和 --argjson 將模板和 diff 作為參數傳遞給 jq
-          #    --arg:      將後續內容視為普通字串
-          #    --argjson:  將後續內容視為已格式化好的 JSON
-          # 這樣 jq 程式碼本身就非常乾淨，只負責拼接變數
+          # 3. Build the payload by passing variables to jq with --arg and --argjson.
+          # This avoids all complex quoting issues within the jq program itself.
+          # The jq program now simply combines the variables.
           JSON_PAYLOAD=$(jq -n \
             --arg template "$PROMPT_TEMPLATE" \
             --argjson diff "$DIFF_CONTENT_JSON" \
@@ -75,15 +74,15 @@ jobs:
               ]
             }')
           
-          # 4. 呼叫 Gemini API (與之前相同)
+          # 4. Call the Gemini API.
           API_RESPONSE=$(curl --fail -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d "$JSON_PAYLOAD")
           
-          # 5. 解析回應 (與之前相同)
+          # 5. Parse the response.
           REVIEW_COMMENT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: Could not parse Gemini response."')
           
-          # 6. 儲存輸出 (與之前相同)
+          # 6. Save the output for the next step.
           echo "review_comment<<EOF" >> $GITHUB_OUTPUT
           echo "$REVIEW_COMMENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
