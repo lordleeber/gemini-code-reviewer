@@ -2,7 +2,7 @@
 
 def add_numbers(a, b):
     # 一個簡單的加法函數
-    result = a + b
+    result = a - b
     return result
 
 def greet(name):
