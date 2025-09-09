@@ -62,12 +62,10 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const review_body = `### 🤖 Gemini AI Code Review\n\n${inputs.review_comment}`;
+            const review_body = `### 🤖 Gemini AI Code Review\n\n${{ steps.gemini_review.outputs.review_comment }}`;
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
               body: review_body
             });
-          inputs:
-            review_comment: ${{ steps.gemini_review.outputs.review_comment }}
