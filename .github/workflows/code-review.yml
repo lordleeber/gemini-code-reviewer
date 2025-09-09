@@ -46,30 +46,10 @@ jobs:
         run: |
           set -eo pipefail
           pip install requests
-          python .github/scripts/review.py
-
-      # ================== 已修正的偵錯步驟 ==================
-      - name: Debug Outputs
-        if: always() # 無論如何都執行此步驟
-        run: |
-          echo "--- 偵錯資訊 ---"
-          echo ""
-          echo "1. 'get_diff' 步驟的輸出是否為 'null' 字串？"
-          IS_NULL=${{ steps.get_diff.outputs.diff_content == 'null' }}
-          echo "結果: $IS_NULL"
-          echo ""
-          echo "---"
-          echo ""
-          echo "2. 'gemini_review' 步驟的輸出 (stdout):"
-          echo "--- START OF STDOUT ---"
-          echo "${{ steps.gemini_review.outputs.stdout }}"
-          echo "--- END OF STDOUT ---"
-          echo ""
-          STDOUT_LENGTH=$(echo -n "${{ steps.gemini_review.outputs.stdout }}" | wc -c)
-          echo "3. 'gemini_review' 輸出的字元長度: $STDOUT_LENGTH"
-          echo ""
-          echo "--- 偵錯資訊結束 ---"
-      # ======================================================
+          # ================== 核心修正 ==================
+          # 將 stderr (2) 重新導向到 stdout (1)，以便捕捉所有輸出
+          python .github/scripts/review.py 2>&1
+          # ===============================================
 
       - name: Post Review Comment to PR
         if: steps.gemini_review.outputs.stdout != ''
