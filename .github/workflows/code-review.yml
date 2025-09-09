@@ -37,6 +37,7 @@ jobs:
             echo 'EOF' >> $GITHUB_OUTPUT
           fi
 
+      # ================== 核心修正 Part 1 ==================
       - name: Run AI Code Review Script
         id: gemini_review
         if: steps.get_diff.outputs.diff_content != 'null'
@@ -47,17 +48,22 @@ jobs:
           set -eo pipefail
           pip install requests
           
+          # 1. 執行 Python 腳本，並將其所有輸出 (stdout 和 stderr) 捕捉到一個 Shell 變數中
           REVIEW_TEXT=$(python .github/scripts/review.py 2>&1)
           
+          # 2. 將捕捉到的內容，明確地寫入到一個名為 "review_comment" 的輸出變數中
           echo 'review_comment<<EOF' >> $GITHUB_OUTPUT
           echo "$REVIEW_TEXT" >> $GITHUB_OUTPUT
           echo 'EOF' >> $GITHUB_OUTPUT
 
+      # ================== 核心修正 Part 2 ==================
       - name: Post Review Comment to PR
+        # 3. 'if' 條件現在檢查我們明確設定的 "review_comment" 變數
         if: steps.gemini_review.outputs.review_comment != ''
         uses: actions/github-script@v7
         with:
           script: |
+            # 4. Script 內也使用我們明確設定的 "review_comment" 變數
             const review_body = `### 🤖 Gemini AI Code Review\n\n${{ steps.gemini_review.outputs.review_comment }}`;
             github.rest.issues.createComment({
               owner: context.repo.owner,
