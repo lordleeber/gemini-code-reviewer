@@ -23,76 +23,42 @@ jobs:
       - name: Get PR Diff
         id: get_diff
         run: |
-          set -eo pipefail # 如果任何指令失敗，立即終止
-
+          set -eo pipefail
           BASE_SHA=${{ github.event.pull_request.base.sha }}
           HEAD_SHA=${{ github.event.pull_request.head.sha }}
           
-          echo "Comparing commits: $BASE_SHA...$HEAD_SHA"
-
           DIFF_CONTENT=$(git diff $BASE_SHA $HEAD_SHA)
 
           if [ -z "$DIFF_CONTENT" ]; then
-            echo "No changes detected."
-            echo "diff_json=null" >> $GITHUB_OUTPUT
+            echo "diff_content=null" >> $GITHUB_OUTPUT
           else
-            echo "diff_json=$(echo "$DIFF_CONTENT" | jq -Rs .)" >> $GITHUB_OUTPUT
+            # 使用 heredoc 來安全地將多行的 diff 內容賦值給輸出變數
+            echo 'diff_content<<EOF' >> $GITHUB_OUTPUT
+            echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
+            echo 'EOF' >> $GITHUB_OUTPUT
           fi
 
-      - name: Call Gemini API for Code Review
+      - name: Run AI Code Review Script
         id: gemini_review
-        if: steps.get_diff.outputs.diff_json != 'null'
+        if: steps.get_diff.outputs.diff_content != 'null'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PR_DIFF: ${{ steps.get_diff.outputs.diff_content }}
         run: |
           set -eo pipefail
           
-          # 1. Use a "here document" to safely store the multi-line prompt template.
-          # This is the most reliable way to handle complex strings in shell.
-          PROMPT_TEMPLATE=$(cat <<'EOF'
-          Please act as a senior software engineer. Review the following code changes (git diff format) and provide constructive feedback. Focus on code quality, potential bugs, style consistency, and best practices. If there are no major issues, confirm that the code looks good. Here is the diff:
+          # 安裝 Python 及依賴套件
+          pip install requests
           
-          EOF
-          )
-          
-          # 2. Get the JSON-formatted diff from the previous step's output.
-          DIFF_CONTENT_JSON=${{ steps.get_diff.outputs.diff_json }}
-          
-          # 3. Build the payload by passing variables to jq with --arg and --argjson.
-          # This avoids all complex quoting issues within the jq program itself.
-          # The jq program now simply combines the variables.
-          JSON_PAYLOAD=$(jq -n \
-            --arg template "$PROMPT_TEMPLATE" \
-            --argjson diff "$DIFF_CONTENT_JSON" \
-            '{
-              "contents": [
-                {
-                  "parts": [
-                    {
-                      "text": ($template + $diff)
-                    }
-                  ]
-                }
-              ]
-            }')
-          
-          # 4. Call the Gemini API.
-          API_RESPONSE=$(curl --fail -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d "$JSON_PAYLOAD")
-          
-          # 5. Parse the response.
-          REVIEW_COMMENT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: Could not parse Gemini response."')
-          
-          # 6. Save the output for the next step.
-          echo "review_comment<<EOF" >> $GITHUB_OUTPUT
-          echo "$REVIEW_COMMENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # 執行我們的 Python 腳本
+          python .github/scripts/review.py
 
       - name: Post Review Comment to PR
-        if: steps.gemini_review.outputs.review_comment != ''
+        if: steps.gemlin_review.outputs.stdout != '' # 確保有 review 內容才留言
         uses: actions/github-script@v7
         with:
           script: |
-            const review_body = `### 🤖 Gemini AI Code Review\n\n${{ steps.gemini_review.outputs.review_comment }}`;
+            const review_body = `### 🤖 Gemini AI Code Review\n\n${{ steps.gemini_review.outputs.stdout }}`;
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
