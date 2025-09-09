@@ -3,23 +3,30 @@ import sys
 import json
 import requests
 
-# --- 從 GitHub Action 傳遞的環境變數中獲取資料 ---
+# --- 從 GitHub Action 傳遞的環境變數中獲取 API Key ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-PR_DIFF = os.environ.get("PR_DIFF")
+DIFF_FILE_PATH = "pr_diff.txt" # 定義要讀取的檔案路徑
 
-# --- 如果必要的資料缺失，則提前退出 ---
+# --- 如果 API Key 缺失，則提前退出 ---
 if not GEMINI_API_KEY:
     print("錯誤：環境變數 GEMINI_API_KEY 未設定。", file=sys.stderr)
     sys.exit(1)
 
-if not PR_DIFF or PR_DIFF == "null":
-    print("沒有需要審查的程式碼差異。")
-    sys.exit(0)
+# --- 從檔案中讀取 diff 內容 ---
+try:
+    with open(DIFF_FILE_PATH, "r", encoding="utf-8") as f:
+        PR_DIFF = f.read()
+except FileNotFoundError:
+    print(f"錯誤：找不到 diff 檔案 {DIFF_FILE_PATH}", file=sys.stderr)
+    sys.exit(1)
+
+if not PR_DIFF:
+    print("Diff 檔案是空的，沒有需要審查的內容。", file=sys.stderr)
+    sys.exit(0) # 正常退出
 
 # --- 呼叫 Gemini API ---
 API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
 
-# Prompt 現在在 Python 中管理起來更乾淨、更容易
 prompt = f"""
 請扮演一位資深軟體工程師的角色。請審查以下的程式碼變更(git diff 格式)，
 並提供有建設性的回饋。請專注於程式碼品質、潛在的錯誤、風格一致性以及最佳實踐。
@@ -29,30 +36,16 @@ prompt = f"""
 {PR_DIFF}
 """
 
-# 使用 Python 的字典來建立 JSON payload，既安全又簡單
 payload = {
-    "contents": [
-        {
-            "parts": [
-                {"text": prompt}
-            ]
-        }
-    ]
+    "contents": [{"parts": [{"text": prompt}]}]
 }
-
 headers = {"Content-Type": "application/json"}
 
 try:
-    # 發送 API 請求
     response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
-    response.raise_for_status()  # 如果 HTTP 狀態碼是錯誤的 (4xx 或 5xx)，就拋出例外
-
+    response.raise_for_status()
     response_json = response.json()
-
-    # 提取審查的內容
     review_comment = response_json["candidates"][0]["content"]["parts"][0]["text"]
-
-    # 將最終的留言印到標準輸出 (stdout)，這樣下一個 GitHub Action 步驟才能捕捉到它
     print(review_comment)
 
 except requests.exceptions.RequestException as e:
@@ -60,5 +53,5 @@ except requests.exceptions.RequestException as e:
     sys.exit(1)
 except (KeyError, IndexError) as e:
     print(f"錯誤：解析 Gemini API 回應失敗: {e}", file=sys.stderr)
-    # print(f"完整的 API 回應: {response.text}", file=sys.stderr)
+    print(f"完整的 API 回應: {response.text}", file=sys.stderr)
     sys.exit(1)

@@ -20,29 +20,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get PR Diff
+      - name: Get PR Diff and Save to File
         id: get_diff
         run: |
           set -eo pipefail
           BASE_SHA=${{ github.event.pull_request.base.sha }}
           HEAD_SHA=${{ github.event.pull_request.head.sha }}
-          
           DIFF_CONTENT=$(git diff $BASE_SHA $HEAD_SHA)
 
           if [ -z "$DIFF_CONTENT" ]; then
-            echo "diff_content=null" >> $GITHUB_OUTPUT
+            echo "is_empty=true" >> $GITHUB_OUTPUT
           else
-            echo 'diff_content<<EOF' >> $GITHUB_OUTPUT
-            echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
-            echo 'EOF' >> $GITHUB_OUTPUT
+            echo "is_empty=false" >> $GITHUB_OUTPUT
+            # 將 diff 內容寫入檔案
+            echo "$DIFF_CONTENT" > pr_diff.txt
           fi
 
       - name: Run AI Code Review Script
         id: gemini_review
-        if: steps.get_diff.outputs.diff_content != 'null'
+        if: steps.get_diff.outputs.is_empty == 'false'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          PR_DIFF: ${{ steps.get_diff.outputs.diff_content }}
         run: |
           set -eo pipefail
           pip install requests
