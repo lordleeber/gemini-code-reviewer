@@ -58,16 +58,16 @@ jobs:
 
       # ================== 核心修正 Part 2 ==================
       - name: Post Review Comment to PR
-        # 3. 'if' 條件現在檢查我們明確設定的 "review_comment" 變數
         if: steps.gemini_review.outputs.review_comment != ''
         uses: actions/github-script@v7
         with:
           script: |
-            # 4. Script 內也使用我們明確設定的 "review_comment" 變數
-            const review_body = `### 🤖 Gemini AI Code Review\n\n${{ steps.gemini_review.outputs.review_comment }}`;
+            const review_body = `### 🤖 Gemini AI Code Review\n\n${inputs.review_comment}`;
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
               body: review_body
             });
+          inputs:
+            review_comment: ${{ steps.gemini_review.outputs.review_comment }}
