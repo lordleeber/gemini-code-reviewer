@@ -48,8 +48,27 @@ jobs:
           pip install requests
           python .github/scripts/review.py
 
+      # ================== 新增的偵錯步驟 ==================
+      - name: Debug Outputs
+        if: always() # 無論如何都執行此步驟，以便我們看到日誌
+        run: |
+          echo "--- 偵錯資訊 ---"
+          echo "步驟 'get_diff' 的輸出 (diff_content):"
+          if [ "${{ steps.get_diff.outputs.diff_content }}" == "null" ]; then
+            echo "diff_content 是 null"
+          else
+            echo "diff_content 有內容"
+          fi
+          echo "---"
+          echo "步驟 'gemini_review' 的輸出 (stdout):"
+          echo "${{ steps.gemini_review.outputs.stdout }}"
+          echo "---"
+          STDOUT_LENGTH=$(echo -n "${{ steps.gemini_review.outputs.stdout }}" | wc -c)
+          echo "gemini_review 輸出的字元長度: $STDOUT_LENGTH"
+          echo "--- 偵錯資訊結束 ---"
+      # ======================================================
+
       - name: Post Review Comment to PR
-        # 這裡的拼寫已修正
         if: steps.gemini_review.outputs.stdout != ''
         uses: actions/github-script@v7
         with:
