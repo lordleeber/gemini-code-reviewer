@@ -2,13 +2,13 @@ name: Gemini AI Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize] # 當 PR 被開啟或更新時觸發
+    types: [opened, synchronize]
     branches:
-      - main # 只針對指向 main 分支的 PR
+      - main
 
 permissions:
   contents: read
-  pull-requests: write # 賦予寫入 PR 留言的權限
+  pull-requests: write
 
 jobs:
   code-review:
@@ -18,61 +18,61 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 獲取所有 git 歷史，以便比較分支
+          fetch-depth: 0
 
       - name: Get PR Diff
         id: get_diff
         run: |
-          # 取得 Pull Request 的 base 和 head commit SHA
-          BASE_SHA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" ${{ github.event.pull_request.url }} | jq -r .base.sha)
-          HEAD_SHA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" ${{ github.event.pull_request.url }} | jq -r .head.sha)
-          
-          echo "Base SHA: $BASE_SHA"
-          echo "Head SHA: $HEAD_SHA"
+          set -eo pipefail # 如果任何指令失敗，立即終止
 
-          # 產生 diff 並儲存到輸出變數
-          DIFF=$(git diff $BASE_SHA $HEAD_SHA)
-          if [ -z "$DIFF" ]; then
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          
+          echo "Comparing commits: $BASE_SHA...$HEAD_SHA"
+
+          DIFF_CONTENT=$(git diff $BASE_SHA $HEAD_SHA)
+
+          if [ -z "$DIFF_CONTENT" ]; then
             echo "No changes detected."
-            echo "diff_content=No changes to review." >> $GITHUB_OUTPUT
+            echo "diff_json=null" >> $GITHUB_OUTPUT
           else
-            # 將 diff 內容轉換為適合 JSON 的格式
-            DIFF=$(echo "$DIFF" | jq -Rs .)
-            echo "diff_content=$DIFF" >> $GITHUB_OUTPUT
+            echo "diff_json=$(echo "$DIFF_CONTENT" | jq -Rs .)" >> $GITHUB_OUTPUT
           fi
 
       - name: Call Gemini API for Code Review
         id: gemini_review
-        if: steps.get_diff.outputs.diff_content != 'No changes to review.' # 如果有變更才執行
+        if: steps.get_diff.outputs.diff_json != 'null'
         run: |
-          PROMPT="Please act as a senior software engineer. Review the following code changes (git diff format) and provide constructive feedback. Focus on code quality, potential bugs, style consistency, and best practices. If there are no major issues, confirm that the code looks good. Here is the diff:\n\n${{ steps.get_diff.outputs.diff_content }}"
+          set -eo pipefail # 如果任何指令失敗，立即終止
 
-          # 建立 JSON payload
-          JSON_PAYLOAD=$(jq -n --arg prompt "$PROMPT" \
-            '{ "contents": [ { "parts": [ { "text": $prompt } ] } ] }')
+          DIFF_CONTENT_JSON=${{ steps.get_diff.outputs.diff_json }}
 
-          # 呼叫 Gemini API
-          API_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+          JSON_PAYLOAD=$(jq -n \
+            --arg diff_content "$DIFF_CONTENT_JSON" \
+            '{
+              "contents": [
+                {
+                  "parts": [
+                    {
+                      "text": "Please act as a senior software engineer. Review the following code changes (git diff format) and provide constructive feedback. Focus on code quality, potential bugs, style consistency, and best practices. If there are no major issues, confirm that the code looks good. Here is the diff:\n\n\(.diff_content)"
+                    }
+                  ]
+                }
+              ]
+            }')
+
+          API_RESPONSE=$(curl --fail -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d "$JSON_PAYLOAD")
           
-          # 檢查是否有錯誤
-          if echo "$API_RESPONSE" | jq -e '.error' > /dev/null; then
-            echo "Error from Gemini API:"
-            echo "$API_RESPONSE"
-            REVIEW_COMMENT="Error processing code review by Gemini."
-          else
-            # 解析回應並提取 review 內容
-            REVIEW_COMMENT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
-          fi
-
-          # 將 review 留言儲存到 GitHub 的輸出變數中，以便後續步驟使用
+          REVIEW_COMMENT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Error: Could not parse Gemini response."')
+          
           echo "review_comment<<EOF" >> $GITHUB_OUTPUT
           echo "$REVIEW_COMMENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Post Review Comment to PR
-        if: steps.gemini_review.outputs.review_comment != '' # 如果有 review 內容才留言
+        if: steps.gemini_review.outputs.review_comment != ''
         uses: actions/github-script@v7
         with:
           script: |
