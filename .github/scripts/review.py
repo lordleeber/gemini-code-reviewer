@@ -26,10 +26,10 @@ if not PR_DIFF:
 
 # 在 prompt 中告知 AI，內容可能被截斷
 prompt = f"""
-Please act as a senior software engineer. Review the following code changes (git diff format).
-Provide constructive feedback on code quality, potential bugs, and best practices.
-Note: The provided diff may be truncated for brevity.
-Here is the diff:
+請扮演一位資深軟體工程師的角色，並使用繁體中文來回答。
+請審查以下的程式碼變更（git diff 格式），並針對程式碼品質、潛在的錯誤和最佳實踐提供有建設性的回饋。
+請注意：為了簡潔，提供的 diff 內容可能被截斷。
+這是程式碼的 diff 內容：
 
 {PR_DIFF}
 """
