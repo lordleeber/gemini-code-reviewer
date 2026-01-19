@@ -1,60 +1,81 @@
 import os
 import sys
-import json
+
 import requests
 
-# --- 從 GitHub Action 傳遞的環境變數中獲取 API Key ---
+# --- Get API Key from environment variables passed from GitHub Action ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-DIFF_FILE_PATH = "pr_diff.txt" # 定義要讀取的檔案路徑
+DIFF_FILE_PATH = "pr_diff.txt"  # Define the path of the file to read
 
-# --- 如果 API Key 缺失，則提前退出 ---
+# --- Exit early if API Key is missing ---
 if not GEMINI_API_KEY:
-    print("錯誤：環境變數 GEMINI_API_KEY 未設定。", file=sys.stderr)
+    print("Error: Environment variable GEMINI_API_KEY is not set.", file=sys.stderr)
     sys.exit(1)
 
-# --- 從檔案中讀取 diff 內容 ---
+# --- Read diff content from the file ---
 try:
-    with open(DIFF_FILE_PATH, "r", encoding="utf-8") as f:
+    with open(DIFF_FILE_PATH, encoding="utf-8") as f:
         PR_DIFF = f.read()
 except FileNotFoundError:
-    print(f"錯誤：找不到 diff 檔案 {DIFF_FILE_PATH}", file=sys.stderr)
+    print(f"Error: Diff file not found at {DIFF_FILE_PATH}", file=sys.stderr)
     sys.exit(1)
 
 if not PR_DIFF:
-    print("Diff 檔案是空的，沒有需要審查的內容。", file=sys.stderr)
-    sys.exit(0) # 正常退出
+    print("Diff file is empty, no content to review.", file=sys.stderr)
+    sys.exit(0)  # Exit normally
 
-# 在 prompt 中告知 AI，內容可能被截斷
+# Inform the AI in the prompt that the content may be truncated
 prompt = f"""
-請扮演一位資深軟體工程師的角色，並使用繁體中文來回答。
-請審查以下的程式碼變更（git diff 格式），並針對程式碼品質、潛在的錯誤和最佳實踐提供有建設性的回饋。
-請注意：為了簡潔，提供的 diff 內容可能被截斷。
-這是程式碼的 diff 內容：
+Please act as a senior software engineer and respond in English.
+Please review the following code changes (in git diff format) and provide constructive feedback 
+on code quality, potential bugs, and best practices.
+Please note: For brevity, the provided diff content may be truncated.
+This is the code diff content:
 
 {PR_DIFF}
 """
 
-payload = {
-    "contents": [{"parts": [{"text": prompt}]}]
-}
+payload = {"contents": [{"parts": [{"text": prompt}]}]}
 headers = {"Content-Type": "application/json"}
+api_url = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+)
+
+
+# --- Debugging: Print request details (excluding sensitive key) ---
+print("--- Calling Gemini API ---", file=sys.stderr)
+print(f"URL: {api_url.split('?')[0]}", file=sys.stderr)  # Print URL without key
+print(f"Headers: {headers}", file=sys.stderr)
 
 try:
     response = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}",
+        api_url,
         headers=headers,
         json=payload,
-        timeout=180 # 增加超時時間以應對較大的 prompt
+        timeout=180,  # Increase timeout for larger prompts
     )
+    # Check for HTTP errors specifically
     response.raise_for_status()
+
     response_json = response.json()
     review_comment = response_json["candidates"][0]["content"]["parts"][0]["text"]
     print(review_comment)
 
+except requests.exceptions.HTTPError as e:
+    print("--- HTTP Error ---", file=sys.stderr)
+    print(f"Error: Received status code {e.response.status_code}", file=sys.stderr)
+    print(f"Full API response: {e.response.text}", file=sys.stderr)
+    sys.exit(1)
 except requests.exceptions.RequestException as e:
-    print(f"錯誤：呼叫 Gemini API 失敗: {e}", file=sys.stderr)
+    print("--- Network Error ---", file=sys.stderr)
+    print(f"Error: Failed to call Gemini API due to a network issue: {e}", file=sys.stderr)
     sys.exit(1)
 except (KeyError, IndexError) as e:
-    print(f"錯誤：解析 Gemini API 回應失敗: {e}", file=sys.stderr)
-    print(f"完整的 API 回應: {response.text}", file=sys.stderr)
+    print("--- Response Parse Error ---", file=sys.stderr)
+    print(f"Error: Failed to parse Gemini API response: {e}", file=sys.stderr)
+    print(f"Full API response: {response.text}", file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print("--- An Unexpected Error Occurred ---", file=sys.stderr)
+    print(f"Error: {e}", file=sys.stderr)
     sys.exit(1)

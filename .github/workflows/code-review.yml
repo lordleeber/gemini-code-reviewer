@@ -26,15 +26,21 @@ jobs:
           set -eo pipefail
           BASE_SHA=${{ github.event.pull_request.base.sha }}
           HEAD_SHA=${{ github.event.pull_request.head.sha }}
-          DIFF_CONTENT=$(git diff $BASE_SHA $HEAD_SHA)
-
-          if [ -z "$DIFF_CONTENT" ]; then
-            echo "is_empty=true" >> $GITHUB_OUTPUT
-          else
+          
+          # Stream diff to a temporary file to avoid storing it all in memory
+          git diff $BASE_SHA $HEAD_SHA > pr_diff.full
+          
+          # Check if the diff file is empty
+          if [ -s pr_diff.full ]; then
             echo "is_empty=false" >> $GITHUB_OUTPUT
-            # 將 diff 的前 500 行寫入檔案，避免檔案過大
-            echo "$DIFF_CONTENT" | head -n 500 > pr_diff.txt
+            # Take the first 2000 lines for the review
+            head -n 2000 pr_diff.full > pr_diff.txt
+          else
+            echo "is_empty=true" >> $GITHUB_OUTPUT
           fi
+          
+          # Clean up the full diff file
+          rm pr_diff.full
 
       - name: Run AI Code Review Script
         id: gemini_review
@@ -44,12 +50,23 @@ jobs:
         run: |
           set -eo pipefail
           pip install requests
-          
-          REVIEW_TEXT=$(python .github/scripts/review.py 2>&1)
-          
-          echo 'review_comment<<EOF' >> $GITHUB_OUTPUT
-          echo "$REVIEW_TEXT" >> $GITHUB_OUTPUT
-          echo 'EOF' >> $GITHUB_OUTPUT
+          output_file=$(mktemp)
+          # Execute the script, teeing its output to both the log and the temp file.
+          # The exit code of the python script is captured via PIPESTATUS, not the exit code of tee.
+          python .github/scripts/review.py 2>&1 | tee "$output_file"
+          exit_code=${PIPESTATUS[0]}
+          # Now, handle the output and exit code
+          output=$(<"$output_file")
+          echo "review_comment<<EOF" >> $GITHUB_OUTPUT
+          echo "$output" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          if [ $exit_code -ne 0 ]; then
+            echo "Error: Python script failed with exit code $exit_code"
+            # The output is already visible in the log because of tee, but we can print it again for clarity.
+            echo "Script output was:"
+            echo "$output"
+            exit $exit_code
+          fi
 
       - name: Post Review Comment to PR
         if: steps.gemini_review.outputs.review_comment != ''
