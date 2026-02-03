@@ -26,22 +26,20 @@ jobs:
           set -eo pipefail
           BASE_SHA=${{ github.event.pull_request.base.sha }}
           HEAD_SHA=${{ github.event.pull_request.head.sha }}
-          
-          # Stream diff to a temporary file to avoid storing it all in memory
-          git diff $BASE_SHA $HEAD_SHA > pr_diff.full
-          
-          # Check if the diff file is empty
-          if [ -s pr_diff.full ]; then
-            echo "is_empty=false" >> $GITHUB_OUTPUT
-            # Take the first 2000 lines for the review
-            head -n 2000 pr_diff.full > pr_diff.txt
-          else
-            echo "is_empty=true" >> $GITHUB_OUTPUT
-          fi
-          
-          # Clean up the full diff file
-          rm pr_diff.full
+          DIFF_CONTENT=$(git diff $BASE_SHA $HEAD_SHA)
 
+          if [ -z "$DIFF_CONTENT" ]; then
+            echo "is_empty=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_empty=false" >> $GITHUB_OUTPUT
+                # Get diff excluding test files, lock files, and generated files
+                # Use || [ $? -eq 141 ] to ignore SIGPIPE errors caused by head -n 1000
+                (git diff $BASE_SHA $HEAD_SHA -- \
+                  ':!*.test.*' ':!*.spec.*' ':!*_test.py' ':!test_*.py' \
+                  ':!package-lock.json' ':!yarn.lock' ':!pnpm-lock.yaml' \
+                  ':!*.min.js' ':!*.min.css' ':!*.map' \
+                  | head -n 1000 > pr_diff.txt) || [ $? -eq 141 ]
+              fi
       - name: Run AI Code Review Script
         id: gemini_review
         if: steps.get_diff.outputs.is_empty == 'false'
